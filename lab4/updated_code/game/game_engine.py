@@ -1,0 +1,157 @@
+import pygame
+from game.deck import Deck
+
+class GameEngine:
+    REVEAL_MS = 1200  # how long both cards stay on screen
+
+    def __init__(self, width, height):
+        self.width = width
+        self.height = height
+        self.deck = Deck()
+
+        self.current_card = self.deck.draw()
+        self.next_card = None
+        self.score = 0
+        self.streak = 0
+
+        # Reveal state: show previous + new card side by side, then move on
+        self.prev_card = None
+        self.revealing = False
+        self.reveal_end_ms = 0
+        self.status_msg = "Will the next card be HIGHER or LOWER?"
+        self.status_color = (220, 220, 220)
+
+        btn_w, btn_h = 140, 48
+        self.btn_higher = pygame.Rect(width // 2 - btn_w - 20, height - 90, btn_w, btn_h)
+        self.btn_lower = pygame.Rect(width // 2 + 20, height - 90, btn_w, btn_h)
+
+        self.font_title = pygame.font.SysFont(None, 40)
+        self.font_medium = pygame.font.SysFont(None, 30)
+        self.font_small = pygame.font.SysFont(None, 24)
+
+    @staticmethod
+    def multiplier_for(streak):
+        """Points multiplier for a given win streak."""
+        if streak >= 5:
+            return 3
+        if streak >= 3:
+            return 2
+        return 1
+
+    def evaluate_guess(self, guess):
+        """Draws next card and evaluates prediction."""
+        if self.revealing:
+            return
+        self.next_card = self.deck.draw()
+        cur = self.current_card.numeric_rank
+        nxt = self.next_card.numeric_rank
+        cur_str = self.current_card.rank_str
+        nxt_str = self.next_card.rank_str
+
+        if nxt == cur:
+            # Tie: no change to score or streak
+            self.status_msg = "PUSH / TIE! Rank matched."
+            self.status_color = (240, 220, 60)
+        else:
+            if guess == "HIGHER":
+                correct = nxt > cur
+            else:
+                correct = nxt < cur
+
+            if correct:
+                self.streak += 1
+                mult = self.multiplier_for(self.streak)
+                self.score += mult
+                msg = f"CORRECT! {nxt_str} vs {cur_str}  +{mult}"
+                if mult > 1:
+                    msg += f" ({mult}x streak bonus!)"
+                self.status_msg = msg
+                self.status_color = (80, 220, 80)
+            else:
+                self.streak = 0
+                self.score = max(0, self.score - 1)
+                self.status_msg = f"WRONG! {nxt_str} vs {cur_str}  -1"
+                self.status_color = (235, 75, 75)
+
+        # Keep the old card on the left and the new one on the right for a moment.
+        # current_card is only advanced once the reveal timer expires.
+        self.prev_card = self.current_card
+        self.revealing = True
+        self.reveal_end_ms = pygame.time.get_ticks() + self.REVEAL_MS
+
+    def _finish_reveal_if_due(self):
+        """Ends the reveal once REVEAL_MS has passed (non-blocking)."""
+        if self.revealing and pygame.time.get_ticks() >= self.reveal_end_ms:
+            self.current_card = self.next_card
+            self.prev_card = None
+            self.revealing = False
+
+    def handle_event(self, event):
+        self._finish_reveal_if_due()
+        if self.revealing:
+            return  # buttons are locked during the reveal
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.btn_higher.collidepoint(event.pos):
+                self.evaluate_guess("HIGHER")
+            elif self.btn_lower.collidepoint(event.pos):
+                self.evaluate_guess("LOWER")
+
+    def update(self):
+        self._finish_reveal_if_due()
+
+    def render(self, screen):
+        screen.fill((25, 80, 45))
+
+        title_surf = self.font_title.render("High-Low Card Predictor", True, (245, 245, 245))
+        screen.blit(title_surf, (self.width // 2 - title_surf.get_width() // 2, 25))
+
+        score_surf = self.font_medium.render(f"Score: {self.score}", True, (255, 220, 80))
+        screen.blit(score_surf, (30, 30))
+
+        mult = self.multiplier_for(self.streak)
+        streak_text = f"Streak: {self.streak}"
+        if mult > 1:
+            streak_text += f"  ({mult}x)"
+        streak_color = (255, 160, 60) if mult > 1 else (210, 210, 210)
+        streak_surf = self.font_small.render(streak_text, True, streak_color)
+        screen.blit(streak_surf, (30, 62))
+
+        rem_surf = self.font_small.render(f"Deck: {self.deck.remaining} left", True, (210, 210, 210))
+        screen.blit(rem_surf, (self.width - rem_surf.get_width() - 30, 35))
+
+        self._finish_reveal_if_due()
+
+        card_w, card_h = 130, 180
+        card_y = 100
+        if self.revealing:
+            gap = 30
+            left_x = self.width // 2 - card_w - gap
+            right_x = self.width // 2 + gap
+            self.prev_card.render(screen, left_x, card_y, card_w, card_h)
+            self.next_card.render(screen, right_x, card_y, card_w, card_h)
+
+            prev_lbl = self.font_small.render("PREVIOUS", True, (210, 210, 210))
+            new_lbl = self.font_small.render("NEW CARD", True, (255, 220, 80))
+            screen.blit(prev_lbl, (left_x + card_w // 2 - prev_lbl.get_width() // 2, card_y - 24))
+            screen.blit(new_lbl, (right_x + card_w // 2 - new_lbl.get_width() // 2, card_y - 24))
+        else:
+            self.current_card.render(screen, self.width // 2 - card_w // 2, card_y, card_w, card_h)
+
+        status_surf = self.font_small.render(self.status_msg, True, self.status_color)
+        screen.blit(status_surf, (self.width // 2 - status_surf.get_width() // 2, 310))
+
+        pygame.draw.rect(screen, (30, 70, 40) if self.revealing else (40, 140, 60), self.btn_higher, border_radius=8)
+        pygame.draw.rect(screen, (220, 220, 220), self.btn_higher, width=2, border_radius=8)
+        high_surf = self.font_medium.render("HIGHER", True, (255, 255, 255))
+        screen.blit(
+            high_surf,
+            (self.btn_higher.centerx - high_surf.get_width() // 2, self.btn_higher.centery - high_surf.get_height() // 2),
+        )
+
+        pygame.draw.rect(screen, (85, 40, 40) if self.revealing else (170, 50, 50), self.btn_lower, border_radius=8)
+        pygame.draw.rect(screen, (220, 220, 220), self.btn_lower, width=2, border_radius=8)
+        low_surf = self.font_medium.render("LOWER", True, (255, 255, 255))
+        screen.blit(
+            low_surf,
+            (self.btn_lower.centerx - low_surf.get_width() // 2, self.btn_lower.centery - low_surf.get_height() // 2),
+        )
