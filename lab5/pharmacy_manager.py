@@ -1,3 +1,4 @@
+#PES2UG24CS059
 """Pharmacy stock and billing manager.
 
 Adds medicines, dispenses them, flags expired stock, bills prescriptions,
