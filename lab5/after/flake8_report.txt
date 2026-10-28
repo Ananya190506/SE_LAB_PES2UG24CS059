@@ -1,0 +1,1 @@
+pharmacy_manager.py:173:11: W292 no newline at end of file

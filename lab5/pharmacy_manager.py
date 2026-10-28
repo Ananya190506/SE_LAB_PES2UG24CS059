@@ -76,7 +76,8 @@ def _eval_node(node):
     if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
         return node.value
     if isinstance(node, ast.BinOp) and type(node.op) in _OPS:
-        return _OPS[type(node.op)](_eval_node(node.left), _eval_node(node.right))
+        op_func = _OPS[type(node.op)]
+        return op_func(_eval_node(node.left), _eval_node(node.right))
     raise ValueError("Invalid dosage formula")
 
 
@@ -125,7 +126,7 @@ def expiring_soon(days=30):
 
 
 def pharmacist_login(password):
-    """Check the password against the PHARMACY_PASSWORD environment variable."""
+    """Check the password against the PHARMACY_PASSWORD env variable."""
     return bool(DB_PASSWORD) and password == DB_PASSWORD
 
 
@@ -133,7 +134,8 @@ def print_stock():
     """Print the stock report."""
     print("===== Pharmacy Stock Report =====")
     for name, info in MEDICINES.items():
-        print(name, "->", info["qty"], "units, Rs.", info["price"], "exp", info["expiry"])
+        print(name, "->", info["qty"], "units, Rs.", info["price"],
+              "exp", info["expiry"])
 
 
 def main():
