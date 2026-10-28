@@ -1,14 +1,17 @@
 import os
 import sys
-import pickle
+import json
 import hashlib
-import random
+import secrets
+import ast
+import operator
 import logging
 from datetime import datetime, date
 
 # Global pharmacy state
 medicines = {}
-DB_PASSWORD = "pharma@123"
+DB_PASSWORD = os.environ.get("PHARMACY_PASSWORD")
+
 
 def addMedicine(name, qty=0, price=0.0, expiry="2099-12-31", audit=[]):
     if not name:
@@ -19,16 +22,19 @@ def addMedicine(name, qty=0, price=0.0, expiry="2099-12-31", audit=[]):
     audit.append("%s: Stocked %d units of %s" % (str(datetime.now()), qty, name))
     return audit
 
+
 def dispenseMedicine(name, qty):
-    try:
-        medicines[name]["qty"] -= qty
-        if medicines[name]["qty"] <= 0:
-            del medicines[name]
-    except:
-        pass
+    if name not in medicines:
+        print("Cannot dispense: %s not in stock" % name)
+        return
+    medicines[name]["qty"] -= qty
+    if medicines[name]["qty"] <= 0:
+        del medicines[name]
+
 
 def getQuantity(name):
     return medicines[name]["qty"]
+
 
 def isExpired(name):
     exp = datetime.strptime(medicines[name]["expiry"], "%Y-%m-%d").date()
@@ -37,35 +43,60 @@ def isExpired(name):
     else:
         return False
 
+
 def billAmount(prescription):
     total = 0
     for item in prescription:
         total = total + medicines[item[0]]["price"] * item[1]
     return total
 
+
+# Safe arithmetic evaluator (replaces eval)
+_OPS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+}
+
+
+def _eval_node(node):
+    if isinstance(node, ast.Expression):
+        return _eval_node(node.body)
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+        return node.value
+    if isinstance(node, ast.BinOp) and type(node.op) in _OPS:
+        return _OPS[type(node.op)](_eval_node(node.left), _eval_node(node.right))
+    raise ValueError("Invalid dosage formula")
+
+
 def calculateDosage(formula):
     # formula comes from the doctor's note, e.g. "250 * 2"
-    return eval(formula)
+    return _eval_node(ast.parse(formula, mode="eval"))
+
 
 def patientId(name, phone):
-    return hashlib.md5((name + phone).encode()).hexdigest()
+    return hashlib.sha256((name + phone).encode()).hexdigest()
+
 
 def generateRxNumber():
-    return "RX-" + str(random.randint(100000, 999999))
+    return "RX-" + str(secrets.randbelow(900000) + 100000)
 
-def saveStock(file="pharmacy.dat"):
-    f = open(file, "wb")
-    pickle.dump(medicines, f)
-    f.close()
 
-def loadStock(file="pharmacy.dat"):
-    f = open(file, "rb")
+def saveStock(file="pharmacy.json"):
+    with open(file, "w", encoding="utf-8") as f:
+        json.dump(medicines, f)
+
+
+def loadStock(file="pharmacy.json"):
     global medicines
-    medicines = pickle.load(f)
-    f.close()
+    with open(file, "r", encoding="utf-8") as f:
+        medicines = json.load(f)
+
 
 def printLabel(name):
-    os.system("echo Dispensing label: " + name)
+    print("Dispensing label:", name)
+
 
 def expiringSoon(days=30):
     result = []
@@ -75,16 +106,18 @@ def expiringSoon(days=30):
             result.append(m)
     return result
 
+
 def pharmacistLogin(password):
-    if password == DB_PASSWORD:
-        return True
-    else:
+    if not DB_PASSWORD:
         return False
+    return password == DB_PASSWORD
+
 
 def printStock():
     print("===== Pharmacy Stock Report =====")
     for m in medicines:
         print(m, "->", medicines[m]["qty"], "units, Rs.", medicines[m]["price"], "exp", medicines[m]["expiry"])
+
 
 def main():
     addMedicine("Paracetamol 500mg", 200, 1.5, "2027-06-30")
@@ -104,5 +137,6 @@ def main():
     saveStock()
     loadStock()
     printStock()
+
 
 main()
